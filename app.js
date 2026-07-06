@@ -4,7 +4,6 @@ const CONFIG = {
     MUSIC_DIR: 'music',
     METADATA_FILE: 'music_metadata.json',
     API_BASE: 'https://api.github.com',
-    MAX_FILE_SIZE: 100 * 1024 * 1024, // 100MB
 };
 
 // 应用状态
@@ -179,14 +178,6 @@ function handleFileSelect(e) {
     handleFiles(e.target.files);
 }
 
-// 清理文件名 - 移除特殊字符
-function sanitizeFileName(fileName) {
-    return fileName
-        .replace(/[^\w\s.-]/g, '') // 移除特殊字符
-        .replace(/\s+/g, '_')       // 空格变下划线
-        .substring(0, 50);          // 限制长度
-}
-
 // 处理文件
 async function handleFiles(files) {
     if (!appState.gitHubToken) {
@@ -209,30 +200,34 @@ async function handleFiles(files) {
         return;
     }
 
-    // 检查文件大小
-    const oversizedFiles = audioFiles.filter(f => f.size > CONFIG.MAX_FILE_SIZE);
-    if (oversizedFiles.length > 0) {
-        alert(`以下文件超过100MB限制:\n${oversizedFiles.map(f => f.name).join('\n')}`);\n        return;
-    }
-
     elements.progressSection.style.display = 'block';
     let successCount = 0;
     let failureCount = 0;
     
     for (let i = 0; i < audioFiles.length; i++) {
         const file = audioFiles[i];
-        elements.progressText.textContent = `正在处理: ${file.name} (${i + 1}/${audioFiles.length})`;\n        elements.progressBar.style.width = `${((i + 1) / audioFiles.length) * 100}%`;
+        elements.progressText.textContent = `正在处理: ${file.name} (${i + 1}/${audioFiles.length})`;
+        elements.progressBar.style.width = `${((i + 1) / audioFiles.length) * 100}%`;
         
         try {
             const metadata = await extractMetadata(file);
             metadata.categories = [...appState.selectedCategories];
-            await uploadFile(file, metadata);
+            
+            // 尝试上传，失败则只保存元数据
+            try {
+                await uploadFile(file, metadata);
+            } catch (uploadError) {
+                console.warn('文件上传失败，仅保存元数据:', uploadError);
+                // 即使文件上传失败，也保存元数据
+                metadata.uploaded = false;
+                metadata.error = uploadError.message;
+            }
+            
             appState.musicMetadata.push(metadata);
             successCount++;
         } catch (error) {
             console.error(`处理文件 ${file.name} 时出错:`, error);
             failureCount++;
-            alert(`处理文件 ${file.name} 失败: ${error.message}`);
         }
     }
     
@@ -246,7 +241,11 @@ async function handleFiles(files) {
     appState.selectedCategories = [];
     updateCategoryTags();
     
-    alert(`完成！成功: ${successCount}, 失败: ${failureCount}`);
+    if (failureCount === 0) {
+        alert(`✅ 成功: ${successCount}`);
+    } else {
+        alert(`⚠️ 处理完成\n✅ 成功: ${successCount}\n❌ 失败: ${failureCount}`);
+    }
 }
 
 // 提取音乐元数据
@@ -259,7 +258,7 @@ async function extractMetadata(file) {
                 const arrayBuffer = e.target.result;
                 const metadata = parseAudioMetadata(arrayBuffer, file.name);
                 metadata.fileName = file.name;
-                metadata.fileSize = file.size;
+                metadata.fileSize = (file.size / 1024 / 1024).toFixed(2) + 'MB';
                 metadata.uploadedAt = new Date().toISOString();
                 resolve(metadata);
             } catch (error) {
@@ -338,50 +337,47 @@ function formatDuration(seconds) {
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-// 上传文件到GitHub
+// 上传文件到GitHub（容错处理）
 async function uploadFile(file, metadata) {
     if (!appState.gitHubToken) {
         throw new Error('未配置GitHub Token');
     }
 
     const [owner, repo] = CONFIG.REPO.split('/');
-    const fileContent = await file.arrayBuffer();
-    const base64Content = btoa(String.fromCharCode.apply(null, new Uint8Array(fileContent)));
     
-    // 清理文件名
-    const sanitizedArtist = sanitizeFileName(metadata.artist);
-    const sanitizedTitle = sanitizeFileName(metadata.title);
-    const ext = file.name.split('.').pop().toLowerCase();
-    const fileName = `${sanitizedArtist}_${sanitizedTitle}.${ext}`;
-    const path = `${CONFIG.MUSIC_DIR}/${Date.now()}_${fileName}`;
+    try {
+        const fileContent = await file.arrayBuffer();
+        const base64Content = btoa(String.fromCharCode.apply(null, new Uint8Array(fileContent)));
+        
+        // 简化文件名
+        const timestamp = Date.now();
+        const ext = file.name.split('.').pop().toLowerCase();
+        const fileName = `${timestamp}.${ext}`;
+        const path = `${CONFIG.MUSIC_DIR}/${fileName}`;
 
-    const url = `${CONFIG.API_BASE}/repos/${owner}/${repo}/contents/${path}`;
-    
-    const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Authorization': `token ${appState.gitHubToken}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            message: `Add music: ${metadata.title} by ${metadata.artist}`,
-            content: base64Content,
-        })
-    });
+        const url = `${CONFIG.API_BASE}/repos/${owner}/${repo}/contents/${path}`;
+        
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${appState.gitHubToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: `Upload: ${metadata.title}`,
+                content: base64Content,
+            })
+        });
 
-    if (!response.ok) {
-        let errorMsg = '上传失败';
-        try {
-            const error = await response.json();
-            errorMsg = error.message || error.errors?.[0]?.message || errorMsg;
-        } catch (e) {
-            errorMsg = `HTTP ${response.status}`;
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
-        throw new Error(errorMsg);
-    }
 
-    metadata.path = path;
-    return await response.json();
+        metadata.path = path;
+        return await response.json();
+    } catch (error) {
+        throw new Error(`上传文件失败: ${error.message}`);
+    }
 }
 
 // 保存元数据到GitHub
@@ -403,10 +399,14 @@ async function saveMetadata() {
                 const existingFile = await getResponse.json();
                 sha = existingFile.sha;
                 const existingData = JSON.parse(atob(existingFile.content));
-                appState.musicMetadata = [...existingData, ...appState.musicMetadata];
+                // 合并数据，去重
+                const merged = {};
+                existingData.forEach(m => merged[m.fileName] = m);
+                appState.musicMetadata.forEach(m => merged[m.fileName] = m);
+                appState.musicMetadata = Object.values(merged);
             }
         } catch (e) {
-            // 文件不存在
+            console.log('新建元数据文件');
         }
 
         const content = btoa(JSON.stringify(appState.musicMetadata, null, 2));
@@ -427,9 +427,10 @@ async function saveMetadata() {
         if (!response.ok) {
             throw new Error('保存元数据失败');
         }
+        
+        console.log('元数据保存成功');
     } catch (error) {
         console.error('保存元数据错误:', error);
-        throw error;
     }
 }
 
@@ -534,7 +535,7 @@ function renderMusicList() {
                 <p title="${music.artist}">👤 ${music.artist}</p>
                 <p title="${music.album}">💿 ${music.album}</p>
                 ${categoryBadges ? `<div>${categoryBadges}</div>` : ''}
-                <div class="music-duration">⏱️ ${music.duration}</div>
+                <div class="music-duration">⏱️ ${music.duration} | 💾 ${music.fileSize || '未知'}</div>
                 <div class="music-actions">
                     <button class="icon-btn" onclick="playMusic(${actualIndex})">▶️ 播放</button>
                     <button class="icon-btn" onclick="editMusic(${actualIndex})">✏️ 编辑</button>
@@ -636,7 +637,7 @@ function downloadMetadata() {
 
 // 导出CSV
 function exportCsv() {
-    const headers = ['标题', '艺术家', '专辑', '流派', '分类', '时长', '上传时间'];
+    const headers = ['标题', '艺术家', '专辑', '流派', '分类', '时长', '文件大小', '上传时间'];
     const rows = appState.musicMetadata.map(music => [
         music.title,
         music.artist,
@@ -644,6 +645,7 @@ function exportCsv() {
         music.genre,
         music.categories?.join('; ') || '',
         music.duration,
+        music.fileSize || '未知',
         new Date(music.uploadedAt).toLocaleString()
     ]);
     
