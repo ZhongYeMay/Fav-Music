@@ -4,6 +4,7 @@ const CONFIG = {
     MUSIC_DIR: 'music',
     METADATA_FILE: 'music_metadata.json',
     API_BASE: 'https://api.github.com',
+    MAX_FILE_SIZE: 100 * 1024 * 1024, // 100MB
 };
 
 // 应用状态
@@ -178,6 +179,14 @@ function handleFileSelect(e) {
     handleFiles(e.target.files);
 }
 
+// 清理文件名 - 移除特殊字符
+function sanitizeFileName(fileName) {
+    return fileName
+        .replace(/[^\w\s.-]/g, '') // 移除特殊字符
+        .replace(/\s+/g, '_')       // 空格变下划线
+        .substring(0, 50);          // 限制长度
+}
+
 // 处理文件
 async function handleFiles(files) {
     if (!appState.gitHubToken) {
@@ -200,30 +209,44 @@ async function handleFiles(files) {
         return;
     }
 
+    // 检查文件大小
+    const oversizedFiles = audioFiles.filter(f => f.size > CONFIG.MAX_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+        alert(`以下文件超过100MB限制:\n${oversizedFiles.map(f => f.name).join('\n')}`);\n        return;
+    }
+
     elements.progressSection.style.display = 'block';
+    let successCount = 0;
+    let failureCount = 0;
     
     for (let i = 0; i < audioFiles.length; i++) {
         const file = audioFiles[i];
-        elements.progressText.textContent = `正在处理: ${file.name} (${i + 1}/${audioFiles.length})`;
-        elements.progressBar.style.width = `${((i + 1) / audioFiles.length) * 100}%`;
+        elements.progressText.textContent = `正在处理: ${file.name} (${i + 1}/${audioFiles.length})`;\n        elements.progressBar.style.width = `${((i + 1) / audioFiles.length) * 100}%`;
         
         try {
             const metadata = await extractMetadata(file);
             metadata.categories = [...appState.selectedCategories];
             await uploadFile(file, metadata);
             appState.musicMetadata.push(metadata);
+            successCount++;
         } catch (error) {
             console.error(`处理文件 ${file.name} 时出错:`, error);
+            failureCount++;
             alert(`处理文件 ${file.name} 失败: ${error.message}`);
         }
     }
     
-    await saveMetadata();
-    await loadMusicList();
+    if (successCount > 0) {
+        await saveMetadata();
+        await loadMusicList();
+    }
+    
     elements.progressSection.style.display = 'none';
     elements.fileInput.value = '';
     appState.selectedCategories = [];
     updateCategoryTags();
+    
+    alert(`完成！成功: ${successCount}, 失败: ${failureCount}`);
 }
 
 // 提取音乐元数据
@@ -325,7 +348,11 @@ async function uploadFile(file, metadata) {
     const fileContent = await file.arrayBuffer();
     const base64Content = btoa(String.fromCharCode.apply(null, new Uint8Array(fileContent)));
     
-    const fileName = `${metadata.artist}_${metadata.title}.${file.name.split('.').pop()}`;
+    // 清理文件名
+    const sanitizedArtist = sanitizeFileName(metadata.artist);
+    const sanitizedTitle = sanitizeFileName(metadata.title);
+    const ext = file.name.split('.').pop().toLowerCase();
+    const fileName = `${sanitizedArtist}_${sanitizedTitle}.${ext}`;
     const path = `${CONFIG.MUSIC_DIR}/${Date.now()}_${fileName}`;
 
     const url = `${CONFIG.API_BASE}/repos/${owner}/${repo}/contents/${path}`;
@@ -343,8 +370,14 @@ async function uploadFile(file, metadata) {
     });
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || '上传失败');
+        let errorMsg = '上传失败';
+        try {
+            const error = await response.json();
+            errorMsg = error.message || error.errors?.[0]?.message || errorMsg;
+        } catch (e) {
+            errorMsg = `HTTP ${response.status}`;
+        }
+        throw new Error(errorMsg);
     }
 
     metadata.path = path;
@@ -396,6 +429,7 @@ async function saveMetadata() {
         }
     } catch (error) {
         console.error('保存元数据错误:', error);
+        throw error;
     }
 }
 
