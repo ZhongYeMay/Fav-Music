@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的音乐库 - Fav-Music</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 我的音乐库</h1>
+            <p>上传并管理您喜欢的音乐文件 | 自动分类和元数据提取</p>
+        </header>
+
+        <main>
+            <!-- GitHub Token设置 -->
+            <div class="token-section">
+                <div class="token-input-group">
+                    <input type="password" id="tokenInput" placeholder="输入GitHub Personal Access Token" class="token-input">
+                    <button id="saveTokenBtn" class="btn btn-small">保存Token</button>
+                    <button id="clearTokenBtn" class="btn btn-small btn-danger">清除</button>
+                </div>
+                <p class="token-hint">🔐 获取Token: <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a></p>
+            </div>
+
+            <!-- 上传区域 -->
+            <section class="upload-section">
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-icon">📁</div>
+                    <h2>拖拽或点击上传音乐文件</h2>
+                    <p>支持 MP3、FLAC、WAV、OGG、M4A 格式</p>
+                    <input type="file" id="fileInput" multiple accept=".mp3,.flac,.wav,.ogg,.m4a" hidden>
+                </div>
+            </section>
+
+            <!-- 分类和标签 -->
+            <section class="category-section">
+                <div class="category-input-group">
+                    <label for="categoryInput">📂 选择或创建分类:</label>
+                    <input type="text" id="categoryInput" placeholder="输入新分类或选择现有分类" class="category-input">
+                    <datalist id="categoryList"></datalist>
+                    <button id="addCategoryBtn" class="btn btn-small btn-secondary">添加分类</button>
+                </div>
+                <div id="categoryTags" class="category-tags"></div>
+            </section>
+
+            <!-- 上传进度 -->
+            <section id="progressSection" class="progress-section" style="display: none;">
+                <div class="progress-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <p id="progressText">正在上传...</p>
+            </section>
+
+            <!-- 分类过滤 -->
+            <section class="filter-section">
+                <div class="filter-buttons">
+                    <button class="filter-btn active" data-category="all">全部</button>
+                </div>
+            </section>
+
+            <!-- 音乐列表 -->
+            <section class="music-list-section">
+                <h2>音乐列表</h2>
+                <div class="search-bar">
+                    <input type="text" id="searchInput" placeholder="🔍 搜索音乐..." class="search-input">
+                </div>
+                <div id="musicList" class="music-grid">
+                    <div class="loading">加载中...</div>
+                </div>
+            </section>
+
+            <!-- 操作按钮 -->
+            <div class="action-buttons">
+                <button id="refreshBtn" class="btn btn-primary">🔄 刷新列表</button>
+                <button id="downloadJsonBtn" class="btn btn-secondary">⬇️ 下载元数据</button>
+                <button id="exportCsvBtn" class="btn btn-secondary">📊 导出CSV</button>
+            </div>
+        </main>
+
+        <footer>
+            <p>音乐库管理系统 • 自动提取音乐元数据 • 支持多分类管理</p>
+        </footer>
+    </div>
+
+    <!-- 音乐播放器Modal -->
+    <div id="playerModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" id="closePlayer">&times;</span>
+            <div class="player-info">
+                <div class="album-art" id="albumArt">
+                    <div class="placeholder">🎵</div>
+                </div>
+                <div class="music-info">
+                    <h3 id="playerTitle">歌曲名称</h3>
+                    <p id="playerArtist">艺术家</p>
+                    <p id="playerAlbum">专辑</p>
+                    <p id="playerGenre">流派</p>
+                    <p id="playerCategory">分类</p>
+                    <p id="playerDuration">时长</p>
+                </div>
+            </div>
+            <audio id="audioPlayer" controls style="width: 100%; margin-top: 20px;">
+                <source type="audio/mpeg">
+                您的浏览器不支持音频播放
+            </audio>
+        </div>
+    </div>
+
+    <!-- 音乐编辑Modal -->
+    <div id="editModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" id="closeEdit">&times;</span>
+            <h2>编辑音乐信息</h2>
+            <form id="editForm" class="edit-form">
+                <div class="form-group">
+                    <label>标题</label>
+                    <input type="text" id="editTitle" required>
+                </div>
+                <div class="form-group">
+                    <label>艺术家</label>
+                    <input type="text" id="editArtist" required>
+                </div>
+                <div class="form-group">
+                    <label>专辑</label>
+                    <input type="text" id="editAlbum" required>
+                </div>
+                <div class="form-group">
+                    <label>流派</label>
+                    <input type="text" id="editGenre">
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <input type="text" id="editCategory">
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
