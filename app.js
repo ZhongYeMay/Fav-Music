@@ -213,12 +213,11 @@ async function handleFiles(files) {
             const metadata = await extractMetadata(file);
             metadata.categories = [...appState.selectedCategories];
             
-            // 尝试上传，失败则只保存元数据
+            // 尝试上传文件
             try {
                 await uploadFile(file, metadata);
             } catch (uploadError) {
-                console.warn('文件上传失败，仅保存元数据:', uploadError);
-                // 即使文件上传失败，也保存元数据
+                console.warn('File upload failed, saving metadata only:', uploadError);
                 metadata.uploaded = false;
                 metadata.error = uploadError.message;
             }
@@ -226,7 +225,7 @@ async function handleFiles(files) {
             appState.musicMetadata.push(metadata);
             successCount++;
         } catch (error) {
-            console.error(`处理文件 ${file.name} 时出错:`, error);
+            console.error(`Error processing file ${file.name}:`, error);
             failureCount++;
         }
     }
@@ -242,9 +241,9 @@ async function handleFiles(files) {
     updateCategoryTags();
     
     if (failureCount === 0) {
-        alert(`✅ 成功: ${successCount}`);
+        alert(`✅ Success: ${successCount}`);
     } else {
-        alert(`⚠️ 处理完成\n✅ 成功: ${successCount}\n❌ 失败: ${failureCount}`);
+        alert(`⚠️ Complete\nSuccess: ${successCount}\nFailed: ${failureCount}`);
     }
 }
 
@@ -266,7 +265,7 @@ async function extractMetadata(file) {
             }
         };
         
-        reader.onerror = () => reject(new Error('文件读取失败'));
+        reader.onerror = () => reject(new Error('File read failed'));
         reader.readAsArrayBuffer(file);
     });
 }
@@ -276,14 +275,14 @@ function parseAudioMetadata(arrayBuffer, fileName) {
     const view = new Uint8Array(arrayBuffer);
     let metadata = {
         title: fileName.replace(/\.[^/.]+$/, ''),
-        artist: '未知艺术家',
-        album: '未知专辑',
-        duration: '未知',
-        genre: '未知',
+        artist: 'Unknown Artist',
+        album: 'Unknown Album',
+        duration: 'Unknown',
+        genre: 'Unknown',
         categories: []
     };
 
-    // ID3v2标签解析 (MP3)
+    // ID3v2 tag parsing (MP3)
     if (view[0] === 0x49 && view[1] === 0x44 && view[2] === 0x33) {
         try {
             const id3Size = ((view[6] & 0x7f) << 21) | 
@@ -310,11 +309,11 @@ function parseAudioMetadata(arrayBuffer, fileName) {
                 offset += 10 + frameSize;
             }
         } catch (e) {
-            console.warn('ID3解析失败:', e);
+            console.warn('ID3 parsing failed:', e);
         }
     }
 
-    // 从文件名提取信息
+    // Extract from filename
     if (fileName.includes(' - ')) {
         const parts = fileName.replace(/\.[^/.]+$/, '').split(' - ');
         if (parts.length >= 2) {
@@ -337,10 +336,10 @@ function formatDuration(seconds) {
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-// 上传文件到GitHub（容错处理）
+// 上传文件到GitHub
 async function uploadFile(file, metadata) {
     if (!appState.gitHubToken) {
-        throw new Error('未配置GitHub Token');
+        throw new Error('GitHub Token not configured');
     }
 
     const [owner, repo] = CONFIG.REPO.split('/');
@@ -349,7 +348,6 @@ async function uploadFile(file, metadata) {
         const fileContent = await file.arrayBuffer();
         const base64Content = btoa(String.fromCharCode.apply(null, new Uint8Array(fileContent)));
         
-        // 简化文件名
         const timestamp = Date.now();
         const ext = file.name.split('.').pop().toLowerCase();
         const fileName = `${timestamp}.${ext}`;
@@ -376,7 +374,7 @@ async function uploadFile(file, metadata) {
         metadata.path = path;
         return await response.json();
     } catch (error) {
-        throw new Error(`上传文件失败: ${error.message}`);
+        throw new Error(`Upload failed: ${error.message}`);
     }
 }
 
@@ -399,14 +397,13 @@ async function saveMetadata() {
                 const existingFile = await getResponse.json();
                 sha = existingFile.sha;
                 const existingData = JSON.parse(atob(existingFile.content));
-                // 合并数据，去重
                 const merged = {};
                 existingData.forEach(m => merged[m.fileName] = m);
                 appState.musicMetadata.forEach(m => merged[m.fileName] = m);
                 appState.musicMetadata = Object.values(merged);
             }
         } catch (e) {
-            console.log('新建元数据文件');
+            console.log('Creating new metadata file');
         }
 
         const content = btoa(JSON.stringify(appState.musicMetadata, null, 2));
@@ -418,26 +415,26 @@ async function saveMetadata() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                message: '更新音乐元数据',
+                message: 'Update music metadata',
                 content: content,
                 ...(sha && { sha })
             })
         });
 
         if (!response.ok) {
-            throw new Error('保存元数据失败');
+            throw new Error('Failed to save metadata');
         }
         
-        console.log('元数据保存成功');
+        console.log('Metadata saved successfully');
     } catch (error) {
-        console.error('保存元数据错误:', error);
+        console.error('Error saving metadata:', error);
     }
 }
 
 // 加载音乐列表
 async function loadMusicList() {
     try {
-        elements.musicList.innerHTML = '<div class="loading">加载中...</div>';
+        elements.musicList.innerHTML = '<div class="loading">Loading...</div>';
         
         const [owner, repo] = CONFIG.REPO.split('/');
         const url = `${CONFIG.API_BASE}/repos/${owner}/${repo}/contents/${CONFIG.METADATA_FILE}`;
@@ -445,14 +442,13 @@ async function loadMusicList() {
         const response = await fetch(url);
         
         if (!response.ok) {
-            elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">还没有上传任何音乐文件</div>';
+            elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">No music files uploaded yet</div>';
             return;
         }
 
         const file = await response.json();
         appState.musicMetadata = JSON.parse(atob(file.content));
         
-        // 提取所有分类
         const allCategories = new Set();
         appState.musicMetadata.forEach(music => {
             if (music.categories) {
@@ -462,20 +458,17 @@ async function loadMusicList() {
         appState.categories = Array.from(allCategories);
         updateCategoryList();
         
-        // 更新过滤按钮
         updateFilterButtons();
-        
-        // 渲染音乐列表
         filterAndRenderMusic();
     } catch (error) {
-        console.error('加载音乐列表错误:', error);
-        elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">加载失败，请稍后重试</div>';
+        console.error('Error loading music list:', error);
+        elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">Failed to load, please try again</div>';
     }
 }
 
 // 更新过滤按钮
 function updateFilterButtons() {
-    const buttons = ['<button class="filter-btn active" data-category="all" onclick="filterByCategory(\'all\')">全部</button>'];
+    const buttons = ['<button class="filter-btn active" data-category="all" onclick="filterByCategory(\'all\')">All</button>'];
     
     appState.categories.forEach(category => {
         buttons.push(`<button class="filter-btn" data-category="${category}" onclick="filterByCategory('${category}')">${category}</button>`);
@@ -486,13 +479,11 @@ function updateFilterButtons() {
 
 // 按分类过滤
 function filterByCategory(category) {
-    // 更新按钮状态
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     document.querySelector(`[data-category="${category}"]`).classList.add('active');
     
-    // 过滤和渲染
     filterAndRenderMusic();
 }
 
@@ -519,7 +510,7 @@ function filterAndRenderMusic() {
 // 渲染音乐列表
 function renderMusicList() {
     if (appState.filteredMusic.length === 0) {
-        elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">没有找到匹配的音乐</div>';
+        elements.musicList.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">No matching music found</div>';
         return;
     }
 
@@ -535,11 +526,11 @@ function renderMusicList() {
                 <p title="${music.artist}">👤 ${music.artist}</p>
                 <p title="${music.album}">💿 ${music.album}</p>
                 ${categoryBadges ? `<div>${categoryBadges}</div>` : ''}
-                <div class="music-duration">⏱️ ${music.duration} | 💾 ${music.fileSize || '未知'}</div>
+                <div class="music-duration">⏱️ ${music.duration} | 💾 ${music.fileSize || 'Unknown'}</div>
                 <div class="music-actions">
-                    <button class="icon-btn" onclick="playMusic(${actualIndex})">▶️ 播放</button>
-                    <button class="icon-btn" onclick="editMusic(${actualIndex})">✏️ 编辑</button>
-                    <button class="icon-btn" onclick="deleteMusic(${actualIndex})">🗑️ 删除</button>
+                    <button class="icon-btn" onclick="playMusic(${actualIndex})">▶️ Play</button>
+                    <button class="icon-btn" onclick="editMusic(${actualIndex})">✏️ Edit</button>
+                    <button class="icon-btn" onclick="deleteMusic(${actualIndex})">🗑️ Delete</button>
                 </div>
             </div>
         `;
@@ -563,7 +554,7 @@ function playMusic(index) {
     document.getElementById('playerArtist').textContent = `${getGenreEmoji(music.genre)} ${music.artist}`;
     document.getElementById('playerAlbum').textContent = `💿 ${music.album}`;
     document.getElementById('playerGenre').textContent = `🎵 ${music.genre}`;
-    document.getElementById('playerCategory').textContent = `📂 ${music.categories?.join(', ') || '未分类'}`;
+    document.getElementById('playerCategory').textContent = `📂 ${music.categories?.join(', ') || 'Uncategorized'}`;
     document.getElementById('playerDuration').textContent = `⏱️ ${music.duration}`;
 
     if (music.path) {
@@ -604,7 +595,7 @@ function saveEditedMusic(e) {
     saveMetadata().then(() => {
         filterAndRenderMusic();
         elements.editModal.style.display = 'none';
-        alert('音乐信息已更新');
+        alert('Music info updated');
     });
 }
 
@@ -614,11 +605,11 @@ function closeEditModal() {
 
 // 删除音乐
 function deleteMusic(index) {
-    if (confirm(`确定要删除 "${appState.musicMetadata[index].title}" 吗？`)) {
+    if (confirm(`Delete "${appState.musicMetadata[index].title}"?`)) {
         appState.musicMetadata.splice(index, 1);
         saveMetadata().then(() => {
             filterAndRenderMusic();
-            alert('音乐已删除');
+            alert('Music deleted');
         });
     }
 }
@@ -637,7 +628,7 @@ function downloadMetadata() {
 
 // 导出CSV
 function exportCsv() {
-    const headers = ['标题', '艺术家', '专辑', '流派', '分类', '时长', '文件大小', '上传时间'];
+    const headers = ['Title', 'Artist', 'Album', 'Genre', 'Category', 'Duration', 'Size', 'Uploaded'];
     const rows = appState.musicMetadata.map(music => [
         music.title,
         music.artist,
@@ -645,7 +636,7 @@ function exportCsv() {
         music.genre,
         music.categories?.join('; ') || '',
         music.duration,
-        music.fileSize || '未知',
+        music.fileSize || 'Unknown',
         new Date(music.uploadedAt).toLocaleString()
     ]);
     
